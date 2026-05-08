@@ -48,6 +48,11 @@ fi
 # ── Setup directories ──
 mkdir -p "$HERMES_HOME"/{cron,sessions,logs,hooks,memories,skills,skins,plans,workspace,home,plugins}
 
+# Expose hermes CLI in ~/.local/bin so login shells (terminal backend) find it.
+# Base image PATH includes /opt/data/.local/bin but hermes lives in the venv.
+mkdir -p "$HERMES_HOME/.local/bin"
+ln -sfn /opt/hermes/.venv/bin/hermes "$HERMES_HOME/.local/bin/hermes"
+
 # Redirect Hermes plugin dir into volume so plugins survive container restarts
 if [ ! -L "${HOME}/.hermes/plugins" ]; then
   mkdir -p "${HOME}/.hermes"
