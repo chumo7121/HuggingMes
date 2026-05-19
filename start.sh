@@ -318,18 +318,19 @@ start_jupyter() {
   local token="${JUPYTER_TOKEN:-${API_SERVER_KEY:-}}"
   if [ -z "$token" ]; then
     echo "WARNING: No GATEWAY_TOKEN or JUPYTER_TOKEN set — JupyterLab skipped (terminal would be unauthenticated)." >&2
-    return 1
+    return 0
   fi
   export JUPYTER_TOKEN="$token"
-  if ! python3 -c "import jupyterlab" >/dev/null 2>&1; then
-    echo "WARNING: jupyterlab not installed; skipping terminal." >&2
-    return 1
+  local VENV_PYTHON="/opt/hermes/.venv/bin/python"
+  if ! "$VENV_PYTHON" -c "import jupyterlab" >/dev/null 2>&1; then
+    echo "WARNING: jupyterlab not installed in venv; skipping terminal." >&2
+    return 0
   fi
   local root_dir="${JUPYTER_ROOT_DIR:-$HERMES_HOME/workspace}"
   mkdir -p "$root_dir"
   ln -sfn "$HERMES_HOME" "$root_dir/HuggingMes" 2>/dev/null || true
   echo "Starting JupyterLab terminal on port 8888 (path: /terminal/) root: $root_dir"
-  python3 -m jupyterlab \
+  "$VENV_PYTHON" -m jupyterlab \
     --ip 127.0.0.1 \
     --port 8888 \
     --no-browser \
