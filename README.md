@@ -202,22 +202,20 @@ With `CLOUDFLARE_WORKERS_TOKEN` set, HuggingMes can create a keep-alive worker t
 | `SYNC_INTERVAL` | `600` | Backup frequency in seconds |
 | `CLOUDFLARE_KEEPALIVE_ENABLED` | `true` | Set `false` to disable keep-awake worker |
 | `TELEGRAM_MODE` | `webhook` | `webhook` or `polling` |
-| `DEV_MODE` | `false` | Set `true` to enable JupyterLab terminal at `/terminal/` |
-| `JUPYTER_TOKEN` | — | Required when `DEV_MODE=true` — secures terminal access |
+| `DEV_MODE` | `true` | Set `false` to disable JupyterLab terminal at `/terminal/` |
+| `JUPYTER_TOKEN` | *(uses `GATEWAY_TOKEN`)* | Override terminal password (optional) |
 
 ## 💻 Terminal Access (JupyterLab)
 
-HuggingMes includes an optional JupyterLab terminal at `/terminal/` for direct shell access to the container — useful for running `hermes` commands, inspecting files, installing packages, and debugging.
+HuggingMes includes a JupyterLab terminal at `/terminal/` for direct shell access to the container — useful for running `hermes` commands, inspecting files, installing packages, and debugging. Enabled by default when `GATEWAY_TOKEN` is set.
 
 ### Setup
 
-1. Add two secrets to your Space:
-   - `DEV_MODE` = `true`
-   - `JUPYTER_TOKEN` = a strong random token (`openssl rand -hex 32`)
-2. Restart the Space.
-3. Open `https://your-space.hf.space/terminal/` — log in with your `GATEWAY_TOKEN` first, then JupyterLab will prompt for `JUPYTER_TOKEN`.
+The terminal is **on by default** — no extra configuration needed. Click **Open Terminal →** on the dashboard, then log in with your `GATEWAY_TOKEN`.
 
-> **Security:** JupyterLab grants full shell access to the container. Always use a strong, unique `JUPYTER_TOKEN`. The terminal will refuse to start if `JUPYTER_TOKEN` is empty or set to the insecure default.
+To disable it, set `DEV_MODE=false`. To use a separate terminal password, set `JUPYTER_TOKEN` to a different value.
+
+> **Security:** JupyterLab grants full shell access to the container. The terminal will not start if no `GATEWAY_TOKEN` is set.
 
 ### What you can do
 

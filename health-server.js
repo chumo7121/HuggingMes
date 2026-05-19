@@ -492,8 +492,11 @@ function renderDashboard(data) {
     header { text-align:center; margin-bottom:22px; }
     h1 { margin:0; font-size:1.65rem; line-height:1; letter-spacing:0; }
     .subtitle { margin-top:12px; color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.14em; font-weight:800; }
-    .hero-action { display:flex; width:100%; min-height:46px; align-items:center; justify-content:center; border-radius:8px; background:#ffffff; color:#000000; text-decoration:none; font-weight:850; font-size:.98rem; margin:24px 0 20px; transition: background 0.15s ease; }
+    .hero-buttons { display:flex; gap:10px; margin:24px 0 20px; }
+    .hero-action { display:flex; flex:1; min-height:46px; align-items:center; justify-content:center; border-radius:8px; background:#ffffff; color:#000000; text-decoration:none; font-weight:850; font-size:.98rem; transition:background 0.15s ease; }
     .hero-action:hover { background:#e5e5e5; }
+    .hero-action.secondary { background:var(--panel); color:var(--text); border:1px solid var(--line); }
+    .hero-action.secondary:hover { background:var(--panel2); }
     .overview { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin-bottom:10px; }
     .tile { border:1px solid var(--line); background:var(--panel); border-radius:11px; padding:18px; min-height:124px; display:flex; flex-direction:column; gap:10px; position:relative; }
     .tile.ok { border-color:rgba(34,197,94,.22); }
@@ -531,7 +534,10 @@ function renderDashboard(data) {
       <h1>HuggingMes</h1>
       <div class="subtitle">Self-hosted - Hermes Agent</div>
     </header>
-    <a class="hero-action" href="${APP_BASE}/" target="_blank" rel="noopener noreferrer">Open Hermes Agent -></a>
+    <div class="hero-buttons">
+      <a class="hero-action" href="${APP_BASE}/" target="_blank" rel="noopener noreferrer">Open Hermes Agent →</a>
+      <a class="hero-action secondary" href="/terminal/" target="_blank" rel="noopener noreferrer">Open Terminal →</a>
+    </div>
     <section class="overview">
       ${tiles}
     </section>

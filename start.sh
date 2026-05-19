@@ -308,17 +308,19 @@ echo "Dashboard : http://127.0.0.1:${DASHBOARD_PORT}"
 echo "Gateway   : http://127.0.0.1:${GATEWAY_API_PORT}"
 echo ""
 
-# ── JupyterLab terminal (DEV_MODE=true + JUPYTER_TOKEN required) ──
+# ── JupyterLab terminal (on by default, uses GATEWAY_TOKEN) ──
 start_jupyter() {
-  if [ "${DEV_MODE:-false}" != "true" ]; then
-    echo "JupyterLab disabled (set DEV_MODE=true to enable /terminal/)."
+  if [ "${DEV_MODE:-true}" = "false" ]; then
+    echo "JupyterLab disabled (DEV_MODE=false)."
     return 0
   fi
-  if [ -z "${JUPYTER_TOKEN:-}" ] || [ "${JUPYTER_TOKEN}" = "huggingface" ]; then
-    echo "ERROR: JUPYTER_TOKEN unset or insecure default. JupyterLab grants full shell — set a strong token." >&2
-    echo "       Hint: openssl rand -hex 32" >&2
+  # Use JUPYTER_TOKEN if set, otherwise fall back to GATEWAY_TOKEN
+  local token="${JUPYTER_TOKEN:-${API_SERVER_KEY:-}}"
+  if [ -z "$token" ]; then
+    echo "WARNING: No GATEWAY_TOKEN or JUPYTER_TOKEN set — JupyterLab skipped (terminal would be unauthenticated)." >&2
     return 1
   fi
+  export JUPYTER_TOKEN="$token"
   if ! python3 -c "import jupyterlab" >/dev/null 2>&1; then
     echo "WARNING: jupyterlab not installed; skipping terminal." >&2
     return 1
