@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const net = require("net");
 const crypto = require("crypto");
@@ -17,6 +18,59 @@ const API_SERVER_KEY = process.env.API_SERVER_KEY || "";
 const APP_BASE = "/app";
 const LOGIN_PATH = "/login";
 const SESSION_COOKIE = "huggingmes_session";
+
+// ── Private Space redirect support ──
+const SPACE_ID = (process.env.SPACE_ID || "").trim();
+function deriveHfSpaceUrl() {
+  if (SPACE_ID) return `https://huggingface.co/spaces/${SPACE_ID}`;
+  const host = (process.env.SPACE_HOST || "").replace(/\.hf\.space$/i, "");
+  const author = (process.env.SPACE_AUTHOR_NAME || "").trim().toLowerCase();
+  if (author && host.toLowerCase().startsWith(author + "-")) {
+    const spaceName = host.slice(author.length + 1);
+    return `https://huggingface.co/spaces/${process.env.SPACE_AUTHOR_NAME}/${spaceName}`;
+  }
+  return "";
+}
+const HF_SPACE_URL = deriveHfSpaceUrl();
+
+let SPACE_IS_PRIVATE = false;
+async function detectSpacePrivacy() {
+  if (!SPACE_ID) return;
+  try {
+    const token = (process.env.HF_TOKEN || "").trim();
+    const reqOptions = {
+      hostname: "huggingface.co",
+      path: `/api/spaces/${SPACE_ID}`,
+      method: "GET",
+      headers: Object.assign(
+        { "User-Agent": "HuggingMes/health-server" },
+        token ? { Authorization: `Bearer ${token}` } : {}
+      ),
+    };
+    await new Promise((resolve) => {
+      const r = https.request(reqOptions, (res) => {
+        let body = "";
+        res.on("data", (chunk) => { body += chunk; });
+        res.on("end", () => {
+          try {
+            if (res.statusCode === 200) {
+              const data = JSON.parse(body);
+              SPACE_IS_PRIVATE = data.private === true;
+            } else if (res.statusCode === 404 && !token) {
+              SPACE_IS_PRIVATE = true;
+            }
+          } catch {}
+          resolve();
+        });
+      });
+      r.on("error", resolve);
+      r.setTimeout(5000, () => { r.destroy(); resolve(); });
+      r.end();
+    });
+    console.log(`[health-server] Space privacy: ${SPACE_IS_PRIVATE ? "private" : "public"}`);
+  } catch {}
+}
+detectSpacePrivacy();
 
 const SYNC_STATUS_FILE = "/tmp/huggingmes-sync-status.json";
 const CLOUDFLARE_KEEPALIVE_STATUS_FILE =
@@ -347,6 +401,36 @@ async function statusPayload() {
   };
 }
 
+function renderPrivateRedirect(targetUrl) {
+  const safeUrl = escapeHtml(targetUrl);
+  return `<!doctype html><html lang="en"><head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta http-equiv="refresh" content="3;url=${safeUrl}"/>
+  <title>HuggingMes — Private Space</title>
+  <style>
+    :root{color-scheme:dark}
+    body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+         font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+         background:#08080f;color:#f6f4ff;text-align:center;padding:24px}
+    .card{border:1px solid #26243a;background:#12111b;border-radius:14px;padding:36px 32px;max-width:440px}
+    h1{margin:0 0 12px;font-size:1.5rem}
+    p{color:#b8b3d7;line-height:1.6;margin:0 0 24px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;
+         background:#fff;color:#000;font-weight:850;font-size:.95rem;
+         border-radius:8px;padding:12px 28px;text-decoration:none;transition:opacity .15s}
+    .btn:hover{opacity:.85}
+    .sub{color:#7f7a9e;font-size:.78rem;margin-top:16px}
+  </style></head><body>
+  <div class="card">
+    <h1>🔒 Private Space</h1>
+    <p>This HuggingFace Space is private. You need to be logged in to <strong>huggingface.co</strong> to access it.<br><br>Redirecting you now&hellip;</p>
+    <a class="btn" href="${safeUrl}">Open on Hugging Face →</a>
+    <div class="sub">Redirecting in 3 seconds&hellip;</div>
+  </div>
+  <script>setTimeout(() => { window.location.replace(${JSON.stringify(targetUrl)}); }, 100);</script>
+</body></html>`;
+}
+
 function badge(label, state) {
   return `<span class="badge ${state ? "ok" : "off"}">${escapeHtml(label)}</span>`;
 }
@@ -529,9 +613,9 @@ function renderDashboard(data) {
       <div class="subtitle">Self-hosted - Hermes Agent</div>
     </header>
     <div class="hero-buttons">
-      <a class="hero-action" href="${APP_BASE}/" target="_blank" rel="noopener noreferrer">Open Hermes Agent →</a>
-      <a class="hero-action secondary" href="/terminal/" target="_blank" rel="noopener noreferrer">Open Terminal →</a>
-      <a class="hero-action secondary" href="/env-builder" target="_blank" rel="noopener noreferrer">ENV Builder →</a>
+      <a class="hero-action" data-space-link="app" href="${APP_BASE}/">Open Hermes Agent →</a>
+      <a class="hero-action secondary" data-space-link="terminal" href="/terminal/">💻 Open Terminal →</a>
+      <a class="hero-action secondary" data-space-link="env-builder" href="/env-builder">⚙️ ENV Builder →</a>
     </div>
     <section class="overview">
       ${tiles}
@@ -543,6 +627,28 @@ function renderDashboard(data) {
       const date = new Date(el.getAttribute('data-iso'));
       if (!isNaN(date)) {
         el.textContent = 'At ' + date.toLocaleTimeString();
+      }
+    });
+    const inEmbeddedApp = (() => { try { return window.top !== window.self; } catch { return true; } })();
+    const isDirectHfSpaceHost = /\.hf\.space$/i.test(window.location.hostname);
+    const HF_SPACE_URL = ${JSON.stringify(HF_SPACE_URL)};
+    const SPACE_IS_PRIVATE = ${JSON.stringify(SPACE_IS_PRIVATE)};
+    if (SPACE_IS_PRIVATE && isDirectHfSpaceHost && !inEmbeddedApp && HF_SPACE_URL) {
+      const notice = document.createElement('div');
+      notice.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#08080f;color:#f6f4ff;font-family:sans-serif;flex-direction:column;gap:16px;z-index:9999';
+      notice.innerHTML = '<span style="font-size:1.1rem">🔒 Private Space &mdash; Redirecting&hellip;</span><a href="' + HF_SPACE_URL + '" style="color:#a5b4fc;font-size:.85rem">Click here if not redirected</a>';
+      document.body.appendChild(notice);
+      setTimeout(() => { window.location.replace(HF_SPACE_URL); }, 300);
+    }
+    // Force new-tab navigation when running inside the HF App iframe or on a raw .hf.space link
+    const openInNewTab = inEmbeddedApp || isDirectHfSpaceHost;
+    document.querySelectorAll('a[data-space-link]').forEach((a) => {
+      if (openInNewTab) {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+      } else {
+        a.removeAttribute('target');
+        a.removeAttribute('rel');
       }
     });
   </script>
@@ -557,6 +663,25 @@ const server = http.createServer(async (req, res) => {
   if (path === LOGIN_PATH) {
     await handleLogin(req, res, parsed);
     return;
+  }
+
+  // ── Private Space Guard (server-side) ──
+  // Intercepts browser HTML requests from raw .hf.space hosts when the Space is private.
+  // /health and /status are always exempt so uptime monitors keep working.
+  const isHtmlReq = (req.headers.accept || "").includes("text/html");
+  const isDirectHfSpaceReq = SPACE_IS_PRIVATE &&
+    HF_SPACE_URL &&
+    isHtmlReq &&
+    typeof req.headers.host === "string" &&
+    req.headers.host.endsWith(".hf.space");
+
+  if (path === "/hf-redirect" || path === "/hf-redirect/") {
+    if (HF_SPACE_URL) {
+      res.writeHead(302, { location: HF_SPACE_URL, "cache-control": "no-store" });
+      return res.end();
+    }
+    res.writeHead(404, { "content-type": "text/plain" });
+    return res.end("SPACE_ID not configured.");
   }
 
   if (path === "/health" || path === `${APP_BASE}/health`) {
@@ -610,6 +735,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (path === "/") {
+    if (isDirectHfSpaceReq) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      return res.end(renderPrivateRedirect(HF_SPACE_URL));
+    }
     const data = await statusPayload();
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderDashboard(data));

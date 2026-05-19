@@ -17,6 +17,7 @@ TELEGRAM_WEBHOOK_PORT="${TELEGRAM_WEBHOOK_PORT:-8765}"
 SYNC_INTERVAL="${SYNC_INTERVAL:-600}"
 BACKUP_DATASET="${BACKUP_DATASET_NAME:-huggingmes-backup}"
 CF_PROXY_ENV_FILE="/tmp/huggingmes-cloudflare-proxy.env"
+STARTUP_FILE="$HERMES_HOME/workspace/startup.sh"
 
 export HERMES_HOME
 export API_SERVER_ENABLED="${API_SERVER_ENABLED:-true}"
@@ -223,6 +224,40 @@ if [ -n "${CLOUDFLARE_PROXY_URL:-}" ] && [ -z "$TELEGRAM_BASE_URL" ]; then
   export TELEGRAM_BASE_FILE_URL="${CLOUDFLARE_PROXY_URL}/file/bot"
 fi
 
+# ── Pool key promotion ──
+# Mirror first key from comma-separated pool vars into the singular env var.
+# Hermes providers read singular vars; this lets users supply pool keys like
+# ANTHROPIC_API_KEYS=key1,key2 and have them picked up automatically.
+promote_first_pool_key() {
+  local singular_var="$1"
+  local pool_var="$2"
+  local singular_val="${!singular_var:-}"
+  local pool_val="${!pool_var:-}"
+  [ -n "$singular_val" ] && return 0
+  [ -n "$pool_val" ] || return 0
+  local first
+  first=$(printf '%s' "$pool_val" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF{print; exit}')
+  [ -n "$first" ] || return 0
+  export "${singular_var}=$first"
+}
+
+promote_first_pool_key "OPENROUTER_API_KEY"   "OPENROUTER_API_KEYS"
+promote_first_pool_key "ANTHROPIC_API_KEY"    "ANTHROPIC_API_KEYS"
+promote_first_pool_key "OPENAI_API_KEY"       "OPENAI_API_KEYS"
+promote_first_pool_key "GOOGLE_API_KEY"       "GOOGLE_API_KEYS"
+promote_first_pool_key "GEMINI_API_KEY"       "GEMINI_API_KEYS"
+promote_first_pool_key "DEEPSEEK_API_KEY"     "DEEPSEEK_API_KEYS"
+promote_first_pool_key "KIMI_API_KEY"         "KIMI_API_KEYS"
+promote_first_pool_key "MINIMAX_API_KEY"      "MINIMAX_API_KEYS"
+promote_first_pool_key "NVIDIA_API_KEY"       "NVIDIA_API_KEYS"
+promote_first_pool_key "XAI_API_KEY"          "XAI_API_KEYS"
+promote_first_pool_key "KILOCODE_API_KEY"     "KILOCODE_API_KEYS"
+promote_first_pool_key "GLM_API_KEY"          "GLM_API_KEYS"
+promote_first_pool_key "ARCEEAI_API_KEY"      "ARCEEAI_API_KEYS"
+promote_first_pool_key "DASHSCOPE_API_KEY"    "DASHSCOPE_API_KEYS"
+promote_first_pool_key "GMI_API_KEY"          "GMI_API_KEYS"
+promote_first_pool_key "TOKENHUB_API_KEY"     "TOKENHUB_API_KEYS"
+
 # ── Build config ──
 python3 - <<'PY'
 import os
@@ -288,11 +323,19 @@ path.chmod(0o600)
 PY
 
 # ── Startup Summary ──
+HERMES_RUNTIME_VERSION="$(/opt/hermes/.venv/bin/hermes --version 2>/dev/null | awk '{print $NF; exit}' || true)"
 echo ""
+if [ -n "${HERMES_RUNTIME_VERSION:-}" ]; then
+  echo "Version   : ${HERMES_RUNTIME_VERSION}"
+fi
 echo "Model     : ${MODEL_FOR_CONFIG:-unset}"
 echo "Provider  : ${PROVIDER_FOR_CONFIG:-unset}"
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
-  echo "Telegram  : enabled"
+  if [ -n "${TELEGRAM_WEBHOOK_URL:-}" ]; then
+    echo "Telegram  : webhook"
+  else
+    echo "Telegram  : polling"
+  fi
 else
   echo "Telegram  : not configured"
 fi
@@ -304,17 +347,22 @@ fi
 if [ -n "${CLOUDFLARE_PROXY_URL:-}" ]; then
   echo "Proxy     : ${CLOUDFLARE_PROXY_URL}"
 fi
+echo "Routes    : /app/ (Hermes UI), /terminal/ (JupyterLab)"
 echo "Dashboard : http://127.0.0.1:${DASHBOARD_PORT}"
 echo "Gateway   : http://127.0.0.1:${GATEWAY_API_PORT}"
 echo ""
 
-# ── JupyterLab terminal (on by default, uses GATEWAY_TOKEN) ──
+# ── JupyterLab terminal (on by default when GATEWAY_TOKEN is set) ──
+JUPYTER_PID=""
 start_jupyter() {
   if [ "${DEV_MODE:-true}" = "false" ]; then
     echo "JupyterLab disabled (DEV_MODE=false)."
     return 0
   fi
-  # Use JUPYTER_TOKEN if set, otherwise fall back to GATEWAY_TOKEN
+  # Guard: skip if already running
+  if [ -n "${JUPYTER_PID:-}" ] && kill -0 "$JUPYTER_PID" 2>/dev/null; then
+    return 0
+  fi
   local token="${JUPYTER_TOKEN:-${API_SERVER_KEY:-}}"
   if [ -z "$token" ]; then
     echo "WARNING: No GATEWAY_TOKEN or JUPYTER_TOKEN set — JupyterLab skipped (terminal would be unauthenticated)." >&2
@@ -329,7 +377,7 @@ start_jupyter() {
   local root_dir="${JUPYTER_ROOT_DIR:-$HERMES_HOME/workspace}"
   mkdir -p "$root_dir"
   ln -sfn "$HERMES_HOME" "$root_dir/HuggingMes" 2>/dev/null || true
-  echo "Starting JupyterLab terminal on port 8888 (path: /terminal/) root: $root_dir"
+  echo "Starting JupyterLab terminal on port 8888 (root: $root_dir)"
   "$VENV_PYTHON" -m jupyterlab \
     --ip 127.0.0.1 \
     --port 8888 \
@@ -355,6 +403,8 @@ start_jupyter() {
 }
 
 # ── Trap SIGTERM for graceful shutdown ──
+SYNC_LOOP_PID=""
+DASHBOARD_PID=""
 graceful_shutdown() {
   echo "Shutting down HuggingMes..."
   if [ -n "${HF_TOKEN:-}" ]; then
@@ -364,6 +414,283 @@ graceful_shutdown() {
   exit 0
 }
 trap graceful_shutdown SIGTERM SIGINT
+
+# ── Shell capture wrappers ──
+# Written to ~/.bashrc so terminal installs are recorded in workspace/startup.sh
+# and replayed on next boot — packages survive Space restarts.
+if [ ! -f "$STARTUP_FILE" ]; then
+  touch "$STARTUP_FILE"
+  chmod +x "$STARTUP_FILE"
+  echo "Created workspace/startup.sh"
+fi
+cat > "$HOME/.bashrc" << 'BASHRC'
+export PATH="/opt/hermes/.venv/bin:/opt/data/.local/bin:$PATH"
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
+if [ -z "${PS1:-}" ] || [ "$PS1" = "$ " ]; then
+  export PS1="\u@\h:\w\$ "
+fi
+
+HERMES_HOME="${HERMES_HOME:-/opt/data}"
+STARTUP_FILE="$HERMES_HOME/workspace/startup.sh"
+
+_hm_append() {
+  [ "${HUGGINGMES_CAPTURE_DISABLE:-0}" = "1" ] && return 0
+  local line="$*"
+  mkdir -p "$(dirname "$STARTUP_FILE")"
+  touch "$STARTUP_FILE"
+  chmod +x "$STARTUP_FILE" 2>/dev/null || true
+  grep -qxF "$line" "$STARTUP_FILE" 2>/dev/null || echo "$line" >> "$STARTUP_FILE"
+}
+_hm_quote_args() {
+  local quoted=()
+  local arg
+  for arg in "$@"; do
+    printf -v arg '%q' "$arg"
+    quoted+=("$arg")
+  done
+  printf '%s' "${quoted[*]}"
+}
+_hm_append_cmd() {
+  local cmd="$1"
+  shift
+  local args
+  args=$(_hm_quote_args "$@")
+  if [ -n "$args" ]; then
+    _hm_append "$cmd $args"
+  else
+    _hm_append "$cmd"
+  fi
+}
+_hm_args_without_flags() {
+  local out=()
+  for arg in "$@"; do
+    case "$arg" in
+      ''|-|--*|-*) ;;
+      *) out+=("$arg") ;;
+    esac
+  done
+  printf '%s\n' "${out[@]}"
+}
+_hm_has_install_targets() {
+  local item
+  while IFS= read -r item; do
+    [ -n "$item" ] && return 0
+  done <<EOF
+$(_hm_args_without_flags "$@")
+EOF
+  return 1
+}
+_hm_has_arg() {
+  local needle="$1"
+  shift
+  for arg in "$@"; do
+    [ "$arg" = "$needle" ] && return 0
+  done
+  return 1
+}
+_hm_can_sudo_apt() {
+  command -v sudo >/dev/null 2>&1 && sudo -n apt-get --version >/dev/null 2>&1
+}
+_hm_apt_install() {
+  if [ "$(id -u)" -eq 0 ]; then
+    command apt-get update && command apt-get install -y "$@"
+  elif _hm_can_sudo_apt; then
+    sudo apt-get update && sudo apt-get install -y "$@"
+  else
+    echo "Error: apt install needs root." >&2
+    return 1
+  fi
+}
+apt-get() {
+  case "${1:-}" in
+    install)
+      shift
+      _hm_apt_install "$@"
+      local rc=$?
+      if [ $rc -eq 0 ]; then
+        _hm_has_install_targets "$@" && _hm_append_cmd "sudo apt-get update && sudo apt-get install -y" "$@"
+      fi
+      return $rc
+      ;;
+    update)
+      if [ "$(id -u)" -eq 0 ]; then command apt-get "$@"
+      elif _hm_can_sudo_apt; then sudo apt-get "$@"
+      else command apt-get "$@"; fi
+      return $?
+      ;;
+    *) command apt-get "$@"; return $? ;;
+  esac
+}
+apt() {
+  case "${1:-}" in
+    install)
+      shift
+      _hm_apt_install "$@"
+      local rc=$?
+      if [ $rc -eq 0 ]; then
+        _hm_has_install_targets "$@" && _hm_append_cmd "sudo apt-get update && sudo apt-get install -y" "$@"
+      fi
+      return $rc
+      ;;
+    update)
+      if [ "$(id -u)" -eq 0 ]; then command apt "$@"
+      elif _hm_can_sudo_apt; then sudo apt "$@"
+      else command apt "$@"; fi
+      return $?
+      ;;
+    *) command apt "$@"; return $? ;;
+  esac
+}
+pip() {
+  command pip "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "install" ] \
+      && ! _hm_has_arg -r "${@:2}" && ! _hm_has_arg --requirement "${@:2}" \
+      && _hm_has_install_targets "${@:2}"; then
+    _hm_append_cmd "pip install" "${@:2}"
+  fi
+  return $rc
+}
+pip3() {
+  command pip3 "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "install" ] \
+      && ! _hm_has_arg -r "${@:2}" && ! _hm_has_arg --requirement "${@:2}" \
+      && _hm_has_install_targets "${@:2}"; then
+    _hm_append_cmd "pip install" "${@:2}"
+  fi
+  return $rc
+}
+uv() {
+  command uv "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "pip" ] && [ "${2:-}" = "install" ] \
+      && ! _hm_has_arg -r "${@:3}" && ! _hm_has_arg --requirements "${@:3}" \
+      && _hm_has_install_targets "${@:3}"; then
+    _hm_append_cmd "uv pip install" "${@:3}"
+  fi
+  return $rc
+}
+npm() {
+  command npm "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && { [ "${1:-}" = "install" ] || [ "${1:-}" = "i" ]; } && { [ "${2:-}" = "-g" ] || [ "${2:-}" = "--global" ]; } && _hm_has_install_targets "${@:3}"; then
+    _hm_append_cmd "npm install -g" "${@:3}"
+  fi
+  return $rc
+}
+hermes() {
+  command hermes "$@"
+  local rc=$?
+  if [ $rc -eq 0 ] && [ "${1:-}" = "plugins" ] && [ "${2:-}" = "install" ] && _hm_has_install_targets "${@:3}"; then
+    _hm_append_cmd "hermes plugins install" "${@:3}"
+  fi
+  return $rc
+}
+BASHRC
+cat > "$HOME/.profile" << 'PROFILE'
+[ -n "${BASH_VERSION:-}" ] && [ -f ~/.bashrc ] && . ~/.bashrc
+PROFILE
+echo "Shell capture wrappers ready."
+
+# ── Optional package installs from HF Variables/Secrets ──
+HM_STARTUP_FAILURES=0
+
+if [ -n "${HUGGINGMES_APT_PACKAGES:-}" ]; then
+  echo "Installing apt packages from HUGGINGMES_APT_PACKAGES..."
+  read -r -a HM_APT_PACKAGES <<< "$HUGGINGMES_APT_PACKAGES"
+  if command -v sudo >/dev/null 2>&1; then
+    if sudo apt-get update && sudo apt-get install -y "${HM_APT_PACKAGES[@]}"; then
+      echo "HUGGINGMES_APT_PACKAGES install complete."
+    else
+      HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+      echo "ERROR: HUGGINGMES_APT_PACKAGES install failed: ${HUGGINGMES_APT_PACKAGES}" >&2
+    fi
+  elif [ "$(id -u)" -eq 0 ]; then
+    if apt-get update && apt-get install -y "${HM_APT_PACKAGES[@]}"; then
+      echo "HUGGINGMES_APT_PACKAGES install complete."
+    else
+      HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+      echo "ERROR: HUGGINGMES_APT_PACKAGES install failed: ${HUGGINGMES_APT_PACKAGES}" >&2
+    fi
+  else
+    HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+    echo "ERROR: root/sudo unavailable; HUGGINGMES_APT_PACKAGES skipped" >&2
+  fi
+fi
+
+if [ -n "${HUGGINGMES_PIP_PACKAGES:-}" ]; then
+  echo "Installing Python packages from HUGGINGMES_PIP_PACKAGES..."
+  read -r -a HM_PIP_PACKAGES <<< "$HUGGINGMES_PIP_PACKAGES"
+  if /opt/hermes/.venv/bin/pip install "${HM_PIP_PACKAGES[@]}"; then
+    echo "HUGGINGMES_PIP_PACKAGES install complete."
+  else
+    HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+    echo "ERROR: HUGGINGMES_PIP_PACKAGES install failed: ${HUGGINGMES_PIP_PACKAGES}" >&2
+  fi
+fi
+
+if [ -n "${HUGGINGMES_NPM_PACKAGES:-}" ]; then
+  echo "Installing npm packages from HUGGINGMES_NPM_PACKAGES..."
+  read -r -a HM_NPM_PACKAGES <<< "$HUGGINGMES_NPM_PACKAGES"
+  if npm install -g "${HM_NPM_PACKAGES[@]}"; then
+    echo "HUGGINGMES_NPM_PACKAGES install complete."
+  else
+    HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+    echo "ERROR: HUGGINGMES_NPM_PACKAGES install failed: ${HUGGINGMES_NPM_PACKAGES}" >&2
+  fi
+fi
+
+# ── Arbitrary startup script (HUGGINGMES_RUN) ──
+# Supports plain bash or base64-encoded scripts (prefix with base64: or b64:).
+# Example: HUGGINGMES_RUN="pip install pandas && npm install -g typescript"
+# Example: HUGGINGMES_RUN="base64:$(base64 -w0 setup.sh)"
+hm_run_startup_auto() {
+  local payload="$1"
+  [ -n "$payload" ] || return 0
+  local script_file
+  script_file=$(mktemp "/tmp/huggingmes-startup.XXXXXX.sh")
+  {
+    echo 'export HUGGINGMES_CAPTURE_DISABLE=1'
+    echo '[ -f ~/.bashrc ] && . ~/.bashrc'
+    if [[ "$payload" == base64:* ]] || [[ "$payload" == b64:* ]]; then
+      printf '%s' "${payload#*:}" | base64 -d
+    else
+      printf '%s\n' "$payload"
+    fi
+  } > "$script_file"
+  chmod 700 "$script_file"
+  echo "[startup:HUGGINGMES_RUN] running script"
+  set +e
+  bash "$script_file"
+  local rc=$?
+  set -e
+  rm -f "$script_file"
+  if [ $rc -eq 0 ]; then
+    echo "[startup:HUGGINGMES_RUN] ok"
+  else
+    HM_STARTUP_FAILURES=$((HM_STARTUP_FAILURES + 1))
+    echo "ERROR: HUGGINGMES_RUN script failed (exit ${rc})" >&2
+  fi
+}
+
+if [ -n "${HUGGINGMES_RUN:-}" ]; then
+  hm_run_startup_auto "$HUGGINGMES_RUN"
+fi
+
+# ── Run workspace startup script ──
+# Replays install commands recorded by the shell wrappers from previous sessions.
+if [ -s "$STARTUP_FILE" ]; then
+  echo "Running workspace/startup.sh..."
+  set +e
+  HUGGINGMES_CAPTURE_DISABLE=1 bash -l "$STARTUP_FILE"
+  set -e
+  echo "Workspace startup script complete."
+fi
+
+if [ "$HM_STARTUP_FAILURES" -gt 0 ]; then
+  echo "Warning: ${HM_STARTUP_FAILURES} startup step(s) failed. Check logs above." >&2
+fi
 
 # ── Start background services ──
 node "$APP_DIR/health-server.js" &
@@ -383,47 +710,101 @@ urllib.request.urlopen(req, timeout=10).read()
 PY
 fi
 
-echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}..."
-(hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
-DASHBOARD_PID=$!
-
-# ── Launch gateway ──
-echo "Launching Hermes gateway..."
-(hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
-GATEWAY_PID=$!
-
-GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-120}"
-ready=false
-for ((i=0; i<GATEWAY_READY_TIMEOUT; i++)); do
-  if (echo > "/dev/tcp/127.0.0.1/${GATEWAY_API_PORT}") 2>/dev/null; then
-    ready=true
-    break
+# ── Launch dashboard once (restarts if it dies) ──
+start_dashboard_once() {
+  if [ -n "${DASHBOARD_PID:-}" ] && kill -0 "$DASHBOARD_PID" 2>/dev/null; then
+    return 0
   fi
-  if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
-    break
+  echo "Launching Hermes dashboard on 127.0.0.1:${DASHBOARD_PORT}..."
+  (hermes dashboard --host 127.0.0.1 --insecure 2>&1 | tee -a "$HERMES_HOME/logs/dashboard.log") &
+  DASHBOARD_PID=$!
+}
+
+# ── Start sync loop once — survives gateway restarts ──
+start_background_sync_once() {
+  [ -n "${HF_TOKEN:-}" ] || return 0
+  if [ -n "${SYNC_LOOP_PID:-}" ] && kill -0 "$SYNC_LOOP_PID" 2>/dev/null; then
+    return 0
   fi
-  sleep 1
-done
-
-if [ "$ready" != "true" ]; then
-  echo ""
-  echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
-  echo "----------------------------------------"
-  tail -40 "$HERMES_HOME/logs/gateway.log" || true
-  exit 1
-fi
-
-if [ -n "${HF_TOKEN:-}" ]; then
   python3 -u "$APP_DIR/hermes-sync.py" loop &
-fi
+  SYNC_LOOP_PID=$!
+}
 
+start_dashboard_once
 start_jupyter
 
-wait "$GATEWAY_PID"
+# ── Gateway restart loop ──
+GATEWAY_RESTART_DELAY="${GATEWAY_RESTART_DELAY:-5}"
+GATEWAY_MAX_RESTARTS="${GATEWAY_MAX_RESTARTS:-0}"
+GATEWAY_RESTART_COUNT=0
+GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-120}"
 
-# Gateway exited (e.g. user restarted from Hermes UI). Sync before container dies.
-# SIGTERM path is handled by graceful_shutdown trap above; this covers natural exit.
-if [ -n "${HF_TOKEN:-}" ]; then
-  echo "Gateway exited — syncing state before shutdown..."
-  python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: final sync failed."
-fi
+while true; do
+  # Monitor health-server — restart if it died unexpectedly
+  if [ -n "${HEALTH_PID:-}" ] && ! kill -0 "$HEALTH_PID" 2>/dev/null; then
+    echo "Warning: health-server exited (PID $HEALTH_PID dead); restarting..."
+    node "$APP_DIR/health-server.js" &
+    HEALTH_PID=$!
+    echo "Health server restarted (PID: $HEALTH_PID)"
+  fi
+
+  # Monitor Hermes dashboard — restart if it died unexpectedly
+  if [ -n "${DASHBOARD_PID:-}" ] && ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
+    echo "Warning: Hermes dashboard exited; restarting..."
+    start_dashboard_once
+  fi
+
+  # Monitor JupyterLab — restart if it died unexpectedly
+  if [ "${DEV_MODE:-true}" != "false" ] && [ -n "${JUPYTER_PID:-}" ] && ! kill -0 "$JUPYTER_PID" 2>/dev/null; then
+    echo "Warning: JupyterLab exited (PID $JUPYTER_PID dead); restarting..."
+    unset JUPYTER_PID
+    start_jupyter
+  fi
+
+  echo "Launching Hermes gateway..."
+  (hermes gateway run 2>&1 | tee -a "$HERMES_HOME/logs/gateway.log") &
+  GATEWAY_PID=$!
+
+  ready=false
+  for ((i=0; i<GATEWAY_READY_TIMEOUT; i++)); do
+    if (echo > "/dev/tcp/127.0.0.1/${GATEWAY_API_PORT}") 2>/dev/null; then
+      ready=true
+      break
+    fi
+    if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$ready" != "true" ]; then
+    echo ""
+    echo "Hermes gateway failed to expose the API health port. Last 40 log lines:"
+    echo "----------------------------------------"
+    tail -40 "$HERMES_HOME/logs/gateway.log" || true
+    exit 1
+  fi
+
+  # Start sync loop (only once — shared across all gateway restarts)
+  start_background_sync_once
+
+  set +e
+  wait "$GATEWAY_PID"
+  GATEWAY_EXIT_CODE=$?
+  set -e
+
+  # Sync state before restart
+  if [ -n "${HF_TOKEN:-}" ]; then
+    echo "Gateway exited — syncing state before restart..."
+    python3 "$APP_DIR/hermes-sync.py" sync-once || echo "Warning: sync failed."
+  fi
+
+  GATEWAY_RESTART_COUNT=$((GATEWAY_RESTART_COUNT + 1))
+  if [ "$GATEWAY_MAX_RESTARTS" != "0" ] && [ "$GATEWAY_RESTART_COUNT" -ge "$GATEWAY_MAX_RESTARTS" ]; then
+    echo "Gateway exited (code ${GATEWAY_EXIT_CODE}); restart limit (${GATEWAY_MAX_RESTARTS}) reached."
+    exit "$GATEWAY_EXIT_CODE"
+  fi
+
+  echo "Gateway exited (code ${GATEWAY_EXIT_CODE}); restarting in ${GATEWAY_RESTART_DELAY}s..."
+  sleep "$GATEWAY_RESTART_DELAY"
+done

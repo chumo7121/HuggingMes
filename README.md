@@ -23,9 +23,9 @@ secrets:
   - name: CLOUDFLARE_WORKERS_TOKEN
     description: "Cloudflare API token for automatic Worker proxy and KeepAlive setup."
   - name: DEV_MODE
-    description: "Set to 'true' to enable the JupyterLab terminal at /terminal/."
+    description: "Set to 'false' to disable the JupyterLab terminal at /terminal/. Terminal is on by default when GATEWAY_TOKEN is set."
   - name: JUPYTER_TOKEN
-    description: "Strong token to secure JupyterLab terminal access (required when DEV_MODE=true). Generate: openssl rand -hex 32"
+    description: "Override terminal password (optional). Defaults to GATEWAY_TOKEN — no extra secret needed."
 ---
 
 <!-- Badges -->
@@ -46,6 +46,8 @@ secrets:
 - [📱 Telegram Setup](#-telegram-setup)
 - [🌐 Cloudflare Proxy](#-cloudflare-proxy)
 - [💾 Backup & Persistence](#-backup--persistence)
+- [📦 Ephemeral Package Re-install](#-ephemeral-package-re-install-optional)
+- [🔑 API Key Rotation](#-api-key-rotation-optional)
 - [💓 Staying Alive](#-staying-alive-recommended-on-free-hf-spaces)
 - [🔐 Security & Advanced](#-security--advanced)
 - [💻 Terminal Access (JupyterLab)](#-terminal-access-jupyterlab)
@@ -58,10 +60,14 @@ secrets:
 - 🧠 **Hermes Core:** Runs Hermes Agent for multi-turn chat, tools, memory, and agent workflows.
 - 🔐 **Secure by Default:** Protects the dashboard and API with a single gateway token.
 - 🌐 **Built-in Connectivity:** Adds Cloudflare Worker proxy support for Telegram and other blocked outbound traffic.
-- 📊 **Dashboard:** Real-time view of uptime, sync health, and agent status at `/`.
+- 📊 **Dashboard:** Real-time view of uptime, sync health, model, provider, and agent status at `/`.
 - 💾 **Persistent Backup:** Syncs chats, config, and session data to a private HF Dataset.
 - ⏰ **Keep-Alive:** Can provision a cron-triggered Cloudflare Worker to keep the Space awake.
-- 💻 **Terminal Access:** Optional JupyterLab terminal at `/terminal/` for direct shell access (enable with `DEV_MODE=true`).
+- 💻 **Terminal Out of the Box:** JupyterLab terminal at `/terminal/` auto-enabled when `GATEWAY_TOKEN` is set — no extra config needed.
+- 🔄 **Self-Healing Gateway:** Gateway, dashboard, health server, and JupyterLab are all monitored and automatically restarted if they exit unexpectedly.
+- 📦 **Ephemeral Package Replay:** Install packages from the terminal and they survive restarts — shell wrappers record `apt`/`pip`/`uv`/`npm`/`hermes` installs and replay them on every boot.
+- 🚀 **Startup Scripts:** Run arbitrary bash at boot via `HUGGINGMES_RUN` or `HUGGINGMES_APT/PIP/NPM_PACKAGES` variables.
+- 🔑 **API Key Pool Rotation:** Supply comma-separated key pools (e.g. `ANTHROPIC_API_KEYS=key1,key2`) and the first key is promoted automatically.
 - 🤖 **Broad Provider Support:** Supports Hermes' native providers, direct API-key providers, OAuth providers, and custom OpenAI-compatible endpoints.
 
 ## 🎥 Video Tutorial
@@ -188,6 +194,56 @@ Hugging Face Spaces often block outbound calls to APIs used by Telegram and some
 
 Set `HF_TOKEN` with write access to enable backup. HuggingMes syncs workspace data to a private HF Dataset named `huggingmes-backup` every 600 seconds by default.
 
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `HF_TOKEN` | — | HF token with **Write** access |
+| `BACKUP_DATASET_NAME` | `huggingmes-backup` | Dataset name for backup |
+| `SYNC_INTERVAL` | `600` | Backup frequency in seconds |
+
+## 📦 Ephemeral Package Re-install *(Optional)*
+
+Install packages in the terminal and they survive Space restarts — no extra config needed. Shell wrappers record every successful `apt install`, `pip install`, `uv pip install`, `npm install -g`, and `hermes plugins install` into `workspace/startup.sh`, which is backed up and replayed automatically on next boot.
+
+For packages you want installed from day one (before the terminal is even opened), use the startup variables:
+
+| Variable | What to put in it |
+| :--- | :--- |
+| `HUGGINGMES_RUN` | Full bash script to run on every startup (multi-line, heredocs, `if` blocks all work) |
+| `HUGGINGMES_APT_PACKAGES` | Space-separated apt packages to install |
+| `HUGGINGMES_PIP_PACKAGES` | Space-separated Python packages to install |
+| `HUGGINGMES_NPM_PACKAGES` | Space-separated npm packages to install globally |
+
+**Example:**
+
+```bash
+HUGGINGMES_RUN="""
+pip install pandas matplotlib
+npm install -g tsx
+sudo apt-get install -y ffmpeg
+"""
+```
+
+For scripts with complex quoting, base64-encode them:
+
+```bash
+# locally
+base64 -w0 setup.sh
+# HF Variable
+HUGGINGMES_RUN=base64:<paste-output-here>
+```
+
+## 🔑 API Key Rotation *(Optional)*
+
+Spread requests across multiple API keys to avoid rate limits. Supply a comma-separated pool — the first key is promoted to the provider's singular env var, and Hermes picks it up automatically.
+
+```bash
+ANTHROPIC_API_KEYS=sk-ant-key1,sk-ant-key2
+OPENAI_API_KEYS=sk-oai-key1,sk-oai-key2
+OPENROUTER_API_KEYS=sk-or-key1,sk-or-key2
+```
+
+Supported pool vars: `OPENROUTER_API_KEYS`, `ANTHROPIC_API_KEYS`, `OPENAI_API_KEYS`, `GOOGLE_API_KEYS`, `GEMINI_API_KEYS`, `DEEPSEEK_API_KEYS`, `KIMI_API_KEYS`, `MINIMAX_API_KEYS`, `NVIDIA_API_KEYS`, `XAI_API_KEYS`, `KILOCODE_API_KEYS`, `GLM_API_KEYS`, `ARCEEAI_API_KEYS`, `DASHSCOPE_API_KEYS`, `GMI_API_KEYS`, `TOKENHUB_API_KEYS`.
+
 ## 💓 Staying Alive
 
 With `CLOUDFLARE_WORKERS_TOKEN` set, HuggingMes can create a keep-alive worker that pings the Space's `/health` endpoint on a schedule so the free tier stays awake longer.
@@ -201,9 +257,12 @@ With `CLOUDFLARE_WORKERS_TOKEN` set, HuggingMes can create a keep-alive worker t
 | `CLOUDFLARE_WORKERS_TOKEN` | — | Cloudflare API token for proxying and keep-awake |
 | `SYNC_INTERVAL` | `600` | Backup frequency in seconds |
 | `CLOUDFLARE_KEEPALIVE_ENABLED` | `true` | Set `false` to disable keep-awake worker |
-| `TELEGRAM_MODE` | `webhook` | `webhook` or `polling` |
+| `TELEGRAM_MODE` | `webhook` | `webhook` or `polling` (webhook auto-configured from `SPACE_HOST`) |
 | `DEV_MODE` | `true` | Set `false` to disable JupyterLab terminal at `/terminal/` |
 | `JUPYTER_TOKEN` | *(uses `GATEWAY_TOKEN`)* | Override terminal password (optional) |
+| `WEBHOOK_URL` | — | Endpoint for POST JSON restart notifications |
+| `GATEWAY_RESTART_DELAY` | `5` | Seconds between gateway restart attempts |
+| `GATEWAY_MAX_RESTARTS` | `0` (unlimited) | Maximum gateway restart count before container exits |
 
 ## 💻 Terminal Access (JupyterLab)
 
@@ -237,7 +296,7 @@ docker compose up --build
 - **Dashboard (`/`)**: Real-time management and monitoring.
 - **Hermes App (`/app/`)**: Secure proxied access to the Hermes UI.
 - **API (`/v1/*`)**: Proxied OpenAI-compatible agent API.
-- **Terminal (`/terminal/`)**: JupyterLab terminal (requires `DEV_MODE=true`).
+- **Terminal (`/terminal/`)**: JupyterLab terminal (auto-enabled when `GATEWAY_TOKEN` is set; set `DEV_MODE=false` to disable).
 - **Health Check (`/health`)**: Readiness probe for HF and keep-alive.
 - **Sync Engine**: Python background task for HF Dataset persistence.
 
