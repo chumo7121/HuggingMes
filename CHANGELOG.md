@@ -8,6 +8,7 @@
 - **Unpinned jupyterlab breaks venv** — `uv pip install jupyterlab` without a version constraint could pull a release incompatible with existing Hermes venv packages. Pinned to `>=4.0,<5` range to bound resolution.
 - **`uv` not in PATH during Docker build** — switched from bare `uv` to explicit `/opt/hermes/.venv/bin/uv` so the install works regardless of base image PATH configuration.
 - **`visudo` not in PATH during Docker build** — switched to explicit `/usr/sbin/visudo` path.
+- **Kanban patch exits with code 1** — entire kanban migration patch now wrapped in `try/except`; any unexpected error (file encoding, permission, changed upstream structure) skips silently instead of failing the Docker build.
 
 ## 0.2.0 - 2026-05-19
 
