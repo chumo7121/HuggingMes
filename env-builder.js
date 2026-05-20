@@ -103,26 +103,27 @@ const ICONS = {
 };
 
 // ── Field definitions ──
+// tag: "critical" | "credential" | "feature" | "optional" | "advanced" | "build"
 const FIELDS = [
   // ── Core ──
   {
     "g": "Core", "icon": "⚡",
     "k": "GATEWAY_TOKEN",
     "lbl": "Gateway token — protects the Hermes web UI",
-    "type": "password", "secret": 1, "common": 1
+    "type": "password", "secret": 1, "common": 1, "tag": "critical"
   },
   {
     "g": "Core", "icon": "⚡",
     "k": "LLM_MODEL",
     "lbl": "Default model (provider/model-name format)",
     "type": "model", "options_key": "LLM_MODEL",
-    "ph": "gemini/gemini-2.5-flash", "common": 1
+    "ph": "gemini/gemini-2.5-flash", "common": 1, "tag": "critical"
   },
   {
     "g": "Core", "icon": "⚡",
     "k": "LLM_API_KEY",
     "lbl": "API key for the chosen provider",
-    "type": "password", "secret": 1, "common": 1
+    "type": "password", "secret": 1, "common": 1, "tag": "credential"
   },
 
   // ── Backup ──
@@ -130,19 +131,19 @@ const FIELDS = [
     "g": "Backup", "icon": "💾",
     "k": "HF_TOKEN",
     "lbl": "HuggingFace token — enables state backup to a private dataset",
-    "type": "password", "secret": 1, "common": 1
+    "type": "password", "secret": 1, "common": 1, "tag": "credential"
   },
   {
     "g": "Backup", "icon": "💾",
     "k": "BACKUP_DATASET_NAME",
     "lbl": "Name of the HF dataset used for backups",
-    "type": "text", "ph": "huggingmes-backup", "common": 1
+    "type": "text", "ph": "huggingmes-backup", "common": 1, "tag": "optional"
   },
   {
     "g": "Backup", "icon": "💾",
     "k": "SYNC_INTERVAL",
     "lbl": "Backup sync interval (seconds)",
-    "type": "number", "ph": "600"
+    "type": "number", "ph": "600", "tag": "optional"
   },
 
   // ── Telegram ──
@@ -150,13 +151,13 @@ const FIELDS = [
     "g": "Telegram", "icon": "📱",
     "k": "TELEGRAM_BOT_TOKEN",
     "lbl": "Telegram bot token from @BotFather",
-    "type": "password", "secret": 1, "common": 1
+    "type": "password", "secret": 1, "common": 1, "tag": "credential"
   },
   {
     "g": "Telegram", "icon": "📱",
     "k": "TELEGRAM_ALLOWED_USERS",
     "lbl": "Allowed Telegram user IDs (comma-separated)",
-    "type": "text", "ph": "123456789,987654321", "common": 1
+    "type": "text", "ph": "123456789,987654321", "common": 1, "tag": "feature"
   },
   {
     "g": "Telegram", "icon": "📱",
@@ -164,19 +165,19 @@ const FIELDS = [
     "lbl": "Telegram update mode",
     "type": "select",
     "options": ["webhook", "polling"],
-    "ph": "webhook"
+    "ph": "webhook", "tag": "optional"
   },
   {
     "g": "Telegram", "icon": "📱",
     "k": "TELEGRAM_WEBHOOK_URL",
     "lbl": "Override webhook URL (auto-detected from SPACE_HOST if blank)",
-    "type": "text", "ph": "https://your-space.hf.space/telegram"
+    "type": "text", "ph": "https://your-space.hf.space/telegram", "tag": "optional"
   },
   {
     "g": "Telegram", "icon": "📱",
     "k": "TELEGRAM_BASE_URL",
     "lbl": "Custom Telegram API base URL (for proxies)",
-    "type": "text", "ph": "https://proxy.example.com/bot"
+    "type": "text", "ph": "https://proxy.example.com/bot", "tag": "optional"
   },
 
   // ── Terminal ──
@@ -184,19 +185,19 @@ const FIELDS = [
     "g": "Terminal", "icon": "💻",
     "k": "DEV_MODE",
     "lbl": "Enable JupyterLab terminal (on by default)",
-    "type": "toggle", "ph": "true", "common": 1
+    "type": "toggle", "ph": "true", "common": 1, "tag": "feature"
   },
   {
     "g": "Terminal", "icon": "💻",
     "k": "JUPYTER_TOKEN",
     "lbl": "Override terminal password (defaults to GATEWAY_TOKEN)",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Terminal", "icon": "💻",
     "k": "JUPYTER_ROOT_DIR",
     "lbl": "JupyterLab root directory",
-    "type": "text", "ph": "/opt/data/workspace"
+    "type": "text", "ph": "/opt/data/workspace", "tag": "optional"
   },
 
   // ── Providers ──
@@ -204,43 +205,43 @@ const FIELDS = [
     "g": "Providers", "icon": "🔑",
     "k": "ANTHROPIC_API_KEY",
     "lbl": "Anthropic API key",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "OPENAI_API_KEY",
     "lbl": "OpenAI API key",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "GOOGLE_API_KEY",
     "lbl": "Google / Gemini API key",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "GEMINI_API_KEY",
     "lbl": "Gemini API key (alias for GOOGLE_API_KEY)",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "OPENROUTER_API_KEY",
     "lbl": "OpenRouter API key",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "DEEPSEEK_API_KEY",
     "lbl": "DeepSeek API key",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "XAI_API_KEY",
     "lbl": "xAI (Grok) API key",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
@@ -248,37 +249,37 @@ const FIELDS = [
     "lbl": "Force Hermes inference provider (overrides auto-detect)",
     "type": "select",
     "options": ["auto", "anthropic", "openai", "gemini", "openrouter", "huggingface", "custom", "deepseek", "xai"],
-    "ph": "auto"
+    "ph": "auto", "tag": "advanced"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "CUSTOM_BASE_URL",
     "lbl": "Custom OpenAI-compatible base URL",
-    "type": "text", "ph": "https://your-api.example.com/v1"
+    "type": "text", "ph": "https://your-api.example.com/v1", "tag": "feature"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "CUSTOM_API_KEY",
     "lbl": "API key for the custom provider",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "CUSTOM_PROVIDER",
     "lbl": "Provider name for custom endpoints",
-    "type": "text", "ph": "custom"
+    "type": "text", "ph": "custom", "tag": "advanced"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "CUSTOM_MODEL_CONTEXT_LENGTH",
     "lbl": "Context length for custom model",
-    "type": "number", "ph": "131072"
+    "type": "number", "ph": "131072", "tag": "advanced"
   },
   {
     "g": "Providers", "icon": "🔑",
     "k": "CUSTOM_MODEL_MAX_TOKENS",
     "lbl": "Max output tokens for custom model",
-    "type": "number", "ph": "8192"
+    "type": "number", "ph": "8192", "tag": "advanced"
   },
 
   // ── Cloudflare ──
@@ -286,19 +287,19 @@ const FIELDS = [
     "g": "Cloudflare", "icon": "☁️",
     "k": "CLOUDFLARE_WORKERS_TOKEN",
     "lbl": "Cloudflare Workers API token (for Telegram proxy setup)",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   },
   {
     "g": "Cloudflare", "icon": "☁️",
     "k": "CLOUDFLARE_PROXY_URL",
     "lbl": "Cloudflare proxy URL for Telegram (if already deployed)",
-    "type": "text", "ph": "https://your-worker.your-subdomain.workers.dev"
+    "type": "text", "ph": "https://your-worker.your-subdomain.workers.dev", "tag": "feature"
   },
   {
     "g": "Cloudflare", "icon": "☁️",
     "k": "CLOUDFLARE_PROXY_DEBUG",
     "lbl": "Enable Cloudflare proxy debug logging",
-    "type": "toggle", "ph": "false"
+    "type": "toggle", "ph": "false", "tag": "advanced"
   },
 
   // ── Advanced ──
@@ -306,25 +307,31 @@ const FIELDS = [
     "g": "Advanced", "icon": "⚙️",
     "k": "WEBHOOK_URL",
     "lbl": "URL to POST a JSON notification on gateway (re)start",
-    "type": "text", "ph": "https://..."
+    "type": "text", "ph": "https://...", "tag": "optional"
+  },
+  {
+    "g": "Advanced", "icon": "⚙️",
+    "k": "SPACE_PRIVACY",
+    "lbl": "Override Space privacy detection (public/private) — skips HF API call",
+    "type": "select", "options": ["public", "private"], "ph": "public", "tag": "advanced"
   },
   {
     "g": "Advanced", "icon": "⚙️",
     "k": "GATEWAY_READY_TIMEOUT",
     "lbl": "Seconds to wait for gateway API port before failing",
-    "type": "number", "ph": "120"
+    "type": "number", "ph": "120", "tag": "advanced"
   },
   {
     "g": "Advanced", "icon": "⚙️",
     "k": "API_SERVER_PORT",
     "lbl": "Hermes gateway internal API port",
-    "type": "number", "ph": "8642"
+    "type": "number", "ph": "8642", "tag": "advanced"
   },
   {
     "g": "Advanced", "icon": "⚙️",
     "k": "DASHBOARD_PORT",
     "lbl": "Hermes dashboard internal port",
-    "type": "number", "ph": "9119"
+    "type": "number", "ph": "9119", "tag": "advanced"
   },
   {
     "g": "Advanced", "icon": "⚙️",
@@ -332,13 +339,13 @@ const FIELDS = [
     "lbl": "Background process notification level",
     "type": "select",
     "options": ["result", "progress", "none"],
-    "ph": "result"
+    "ph": "result", "tag": "optional"
   },
   {
     "g": "Advanced", "icon": "⚙️",
     "k": "TELEGRAM_WEBHOOK_SECRET",
     "lbl": "Secret token for Telegram webhook validation (auto-generated if blank)",
-    "type": "password", "secret": 1
+    "type": "password", "secret": 1, "tag": "credential"
   }
 ];
 
@@ -478,18 +485,21 @@ function valueControlHTML(field) {
   </div>`;
 }
 
+function tagBadgeHTML(f) {
+  const t = f.tag || (f.secret ? 'credential' : 'optional');
+  return `<span class="badge badge-${t}">${t}</span>`;
+}
+
 function cardHTML(f) {
-  const badge = f.secret
-    ? '<span class="badge badge-s">secret</span>'
-    : '<span class="badge badge-f">safe</span>';
-  return `<div class="env-card" data-row data-group="${esc(f.g)}" data-search="${esc((f.g + ' ' + f.k + ' ' + (f.lbl || '')).toLowerCase())}">
+  const tagStr = (f.tag || '') + ' ' + (f.secret ? 'credential' : '') + ' ' + (f.g + ' ' + f.k + ' ' + (f.lbl || '')).toLowerCase();
+  return `<div class="env-card" data-row data-group="${esc(f.g)}" data-tag="${esc(f.tag || '')}" data-search="${esc(tagStr.toLowerCase())}">
     <div class="card-top">
-      <input type="checkbox" class="card-check" data-check="${esc(f.k)}" ${f.common ? 'data-common="1"' : ''}>
+      <input type="checkbox" class="card-check" data-check="${esc(f.k)}" ${f.common ? 'data-common="1"' : ''} ${f.tag === 'critical' ? 'data-critical="1"' : ''}>
       <div class="card-info">
         <div class="card-key">${esc(f.k)}</div>
         <div class="card-lbl">${esc(f.lbl || '')}</div>
       </div>
-      ${badge}
+      ${tagBadgeHTML(f)}
     </div>
     <div class="card-input">${valueControlHTML(f)}</div>
   </div>`;
@@ -550,12 +560,18 @@ function collect() {
   return obj;
 }
 
-function refresh() {
+function generateBundle() {
   const obj = collect();
   const keys = Object.keys(obj).sort();
   const bundle = keys.length ? encodeBundle(Object.fromEntries(keys.map(k => [k, obj[k]]))) : '';
   $('bundleOut').value = bundle;
   $('envLineOut').value = bundle ? `${BUNDLE_KEY}=${bundle}` : '';
+}
+
+function refresh() {
+  // Refresh summary + counts — does NOT auto-regenerate bundle (requires explicit button click)
+  const obj = collect();
+  const keys = Object.keys(obj).sort();
   const s = $('summary');
   if (keys.length) {
     s.innerHTML = `<strong>${keys.length}</strong> variable${keys.length > 1 ? 's' : ''} selected<div class="sum-keys">${keys.map(k => `<span class="sum-key">${esc(k)}</span>`).join('')}</div>`;
@@ -755,6 +771,11 @@ refresh();
 
 // ── Events ──
 $('search').oninput = filter;
+$('selectRequired').onclick = () => {
+  document.querySelectorAll('[data-critical="1"]').forEach(c => c.checked = true);
+  markSelected(); refresh();
+  showToast('Critical fields selected ✓');
+};
 $('selectCommon').onclick = () => {
   document.querySelectorAll('[data-common="1"]').forEach(c => c.checked = true);
   markSelected(); refresh();
@@ -764,6 +785,7 @@ $('selectVisible').onclick = () => {
   markSelected(); refresh();
 };
 $('clearAll').onclick = () => { clearForm(); markSelected(); filter(); refresh(); };
+$('generateBundle').onclick = () => { generateBundle(); showToast('Bundle generated ✓'); };
 $('applyImport').onclick = () => {
   try { applyObj(parseEnv($('importText').value), true); showToast('Imported ✓'); }
   catch (e) { showToast('Import failed'); alert(e.message); }

@@ -33,44 +33,94 @@ function deriveHfSpaceUrl() {
 }
 const HF_SPACE_URL = deriveHfSpaceUrl();
 
-let SPACE_IS_PRIVATE = false;
-async function detectSpacePrivacy() {
-  if (!SPACE_ID) return;
-  try {
-    const token = (process.env.HF_TOKEN || "").trim();
-    const reqOptions = {
-      hostname: "huggingface.co",
-      path: `/api/spaces/${SPACE_ID}`,
-      method: "GET",
-      headers: Object.assign(
-        { "User-Agent": "HuggingMes/health-server" },
-        token ? { Authorization: `Bearer ${token}` } : {}
-      ),
-    };
-    await new Promise((resolve) => {
-      const r = https.request(reqOptions, (res) => {
-        let body = "";
-        res.on("data", (chunk) => { body += chunk; });
-        res.on("end", () => {
-          try {
-            if (res.statusCode === 200) {
-              const data = JSON.parse(body);
-              SPACE_IS_PRIVATE = data.private === true;
-            } else if (res.statusCode === 404 && !token) {
-              SPACE_IS_PRIVATE = true;
-            }
-          } catch {}
-          resolve();
-        });
-      });
-      r.on("error", resolve);
-      r.setTimeout(5000, () => { r.destroy(); resolve(); });
-      r.end();
-    });
-    console.log(`[health-server] Space privacy: ${SPACE_IS_PRIVATE ? "private" : "public"}`);
-  } catch {}
+// Privacy detection priority:
+//   1. SPACE_PRIVACY env var ("public"/"private") — explicit override, skip API call
+//   2. HF API auto-detect with retry
+//   3. Fail-secure: treat as private if SPACE_ID set
+const _spacPrivacyEnv = (process.env.SPACE_PRIVACY || "").trim().toLowerCase();
+let SPACE_IS_PRIVATE;
+let _privacyDetectionDone = false;
+let _privacyDetectionResolve;
+const privacyDetectionReady = new Promise((res) => { _privacyDetectionResolve = res; });
+
+if (_spacPrivacyEnv === "public") {
+  SPACE_IS_PRIVATE = false;
+  _privacyDetectionDone = true;
+  console.log("[health-server] Space privacy: public (SPACE_PRIVACY env override)");
+  _privacyDetectionResolve();
+} else if (_spacPrivacyEnv === "private") {
+  SPACE_IS_PRIVATE = true;
+  _privacyDetectionDone = true;
+  console.log("[health-server] Space privacy: private (SPACE_PRIVACY env override)");
+  _privacyDetectionResolve();
+} else {
+  // Fail-secure default until API call resolves
+  SPACE_IS_PRIVATE = !!SPACE_ID;
 }
-detectSpacePrivacy();
+
+async function detectSpacePrivacy() {
+  if (_spacPrivacyEnv === "public" || _spacPrivacyEnv === "private") return;
+  if (!SPACE_ID) {
+    SPACE_IS_PRIVATE = false;
+    _privacyDetectionDone = true;
+    _privacyDetectionResolve();
+    return;
+  }
+  const token = (process.env.HF_TOKEN || "").trim();
+  const reqOptions = {
+    hostname: "huggingface.co",
+    path: `/api/spaces/${SPACE_ID}`,
+    method: "GET",
+    headers: Object.assign(
+      { "User-Agent": "HuggingMes/health-server" },
+      token ? { Authorization: `Bearer ${token}` } : {}
+    ),
+  };
+  const MAX_ATTEMPTS = 5;
+  let detected = false;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await new Promise((resolve) => {
+        const r = https.request(reqOptions, (apiRes) => {
+          let body = "";
+          apiRes.on("data", (chunk) => { body += chunk; });
+          apiRes.on("end", () => {
+            try {
+              if (apiRes.statusCode === 200) {
+                SPACE_IS_PRIVATE = JSON.parse(body).private === true;
+                resolve({ ok: true });
+              } else if (apiRes.statusCode === 401 || apiRes.statusCode === 403) {
+                SPACE_IS_PRIVATE = true;
+                resolve({ ok: true });
+              } else {
+                resolve({ ok: false });
+              }
+            } catch { resolve({ ok: false }); }
+          });
+        });
+        r.on("error", () => resolve({ ok: false }));
+        r.setTimeout(8000, () => { r.destroy(); resolve({ ok: false }); });
+        r.end();
+      });
+      console.log(`[health-server] Privacy detection attempt ${attempt}/${MAX_ATTEMPTS}: ok=${result.ok}`);
+      if (result.ok) { detected = true; break; }
+    } catch {}
+    const delay = Math.min(2000 * attempt, 10000);
+    if (attempt < MAX_ATTEMPTS) await new Promise((r) => setTimeout(r, delay));
+  }
+  if (!detected) {
+    console.warn(`[health-server] Privacy detection failed after ${MAX_ATTEMPTS} attempts — defaulting to ${SPACE_IS_PRIVATE ? "private" : "public"}. TIP: Set SPACE_PRIVACY=public in Space secrets to skip API detection.`);
+  } else {
+    console.log(`[health-server] Space privacy detected: ${SPACE_IS_PRIVATE ? "private" : "public"}`);
+  }
+  _privacyDetectionDone = true;
+  _privacyDetectionResolve();
+}
+
+if (_spacPrivacyEnv !== "public" && _spacPrivacyEnv !== "private") {
+  detectSpacePrivacy();
+  setInterval(detectSpacePrivacy, 5 * 60 * 1000);
+}
 
 const SYNC_STATUS_FILE = "/tmp/huggingmes-sync-status.json";
 const CLOUDFLARE_KEEPALIVE_STATUS_FILE =
@@ -427,7 +477,14 @@ function renderPrivateRedirect(targetUrl) {
     <a class="btn" href="${safeUrl}">Open on Hugging Face →</a>
     <div class="sub">Redirecting in 3 seconds&hellip;</div>
   </div>
-  <script>setTimeout(() => { window.location.replace(${JSON.stringify(targetUrl)}); }, 100);</script>
+  <script>
+    // Only auto-redirect when NOT inside an iframe — navigating an iframe to
+    // huggingface.co is blocked by X-Frame-Options and causes "refused to connect".
+    const _inFrame = (() => { try { return window.top !== window.self; } catch { return true; } })();
+    if (!_inFrame) {
+      setTimeout(() => { window.location.replace(${JSON.stringify(targetUrl)}); }, 100);
+    }
+  </script>
 </body></html>`;
 }
 
@@ -632,7 +689,46 @@ function renderDashboard(data) {
     const inEmbeddedApp = (() => { try { return window.top !== window.self; } catch { return true; } })();
     const isDirectHfSpaceHost = /\.hf\.space$/i.test(window.location.hostname);
     const HF_SPACE_URL = ${JSON.stringify(HF_SPACE_URL)};
-    const SPACE_IS_PRIVATE = ${JSON.stringify(SPACE_IS_PRIVATE)};
+    // Server-side value may be stale if privacy detection raced — syncPrivacy() corrects it.
+    let SPACE_IS_PRIVATE = ${JSON.stringify(SPACE_IS_PRIVATE)};
+
+    function applyLinkTargets() {
+      const openInNewTab = !SPACE_IS_PRIVATE && (inEmbeddedApp || isDirectHfSpaceHost);
+      document.querySelectorAll('a[data-space-link]').forEach((a) => {
+        if (openInNewTab) {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+        } else {
+          a.removeAttribute('target');
+          a.removeAttribute('rel');
+        }
+      });
+    }
+    applyLinkTargets();
+
+    function syncPrivacy() {
+      return fetch('/api/is-private', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(d => {
+          if (d.isPrivate !== SPACE_IS_PRIVATE) {
+            SPACE_IS_PRIVATE = d.isPrivate;
+            applyLinkTargets();
+          }
+          return d.isPrivate;
+        })
+        .catch(() => SPACE_IS_PRIVATE);
+    }
+
+    if (isDirectHfSpaceHost) {
+      syncPrivacy().then(isPrivate => {
+        if (isPrivate) {
+          setTimeout(syncPrivacy, 8000);
+          setTimeout(syncPrivacy, 16000);
+        }
+      });
+    }
+
+    // Private redirect — only when NOT in iframe (huggingface.co has X-Frame-Options: DENY)
     if (SPACE_IS_PRIVATE && isDirectHfSpaceHost && !inEmbeddedApp && HF_SPACE_URL) {
       const notice = document.createElement('div');
       notice.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#08080f;color:#f6f4ff;font-family:sans-serif;flex-direction:column;gap:16px;z-index:9999';
@@ -640,17 +736,6 @@ function renderDashboard(data) {
       document.body.appendChild(notice);
       setTimeout(() => { window.location.replace(HF_SPACE_URL); }, 300);
     }
-    // Force new-tab navigation when running inside the HF App iframe or on a raw .hf.space link
-    const openInNewTab = inEmbeddedApp || isDirectHfSpaceHost;
-    document.querySelectorAll('a[data-space-link]').forEach((a) => {
-      if (openInNewTab) {
-        a.setAttribute('target', '_blank');
-        a.setAttribute('rel', 'noopener noreferrer');
-      } else {
-        a.removeAttribute('target');
-        a.removeAttribute('rel');
-      }
-    });
   </script>
 </body>
 </html>`;
@@ -659,6 +744,15 @@ function renderDashboard(data) {
 const server = http.createServer(async (req, res) => {
   const parsed = new URL(req.url, "http://localhost");
   const path = parsed.pathname;
+
+  // Lightweight endpoint for client-side privacy fallback.
+  // Called by dashboard JS to correct stale server-rendered SPACE_IS_PRIVATE value.
+  // No auth required — not sensitive.
+  if (path === "/api/is-private") {
+    if (!_privacyDetectionDone) await privacyDetectionReady;
+    res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+    return res.end(JSON.stringify({ isPrivate: SPACE_IS_PRIVATE }));
+  }
 
   if (path === LOGIN_PATH) {
     await handleLogin(req, res, parsed);
@@ -669,9 +763,31 @@ const server = http.createServer(async (req, res) => {
   // Intercepts browser HTML requests from raw .hf.space hosts when the Space is private.
   // /health and /status are always exempt so uptime monitors keep working.
   const isHtmlReq = (req.headers.accept || "").includes("text/html");
+
+  // RACE CONDITION FIX: await privacy detection before computing redirect logic.
+  // Without this, the fail-secure default (SPACE_IS_PRIVATE=true when SPACE_ID is set)
+  // causes public spaces to redirect during the brief window before API detection completes.
+  if (isHtmlReq && !_privacyDetectionDone) {
+    await Promise.race([
+      privacyDetectionReady,
+      new Promise((r) => setTimeout(r, 1500)),
+    ]);
+  }
+
+  // In-app navigation from same origin or HF App iframe — skip private redirect.
+  const referer = req.headers.referer || req.headers.referrer || "";
+  const isSameOriginNav = !!(referer && typeof req.headers.host === "string" &&
+    referer.startsWith(`https://${req.headers.host}`));
+  const isFromHFApp = !!(referer && (
+    referer.startsWith("https://huggingface.co") ||
+    referer.startsWith("https://hf.co")
+  ));
+
   const isDirectHfSpaceReq = SPACE_IS_PRIVATE &&
     HF_SPACE_URL &&
     isHtmlReq &&
+    !isSameOriginNav &&
+    !isFromHFApp &&
     typeof req.headers.host === "string" &&
     req.headers.host.endsWith(".hf.space");
 

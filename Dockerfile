@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-venv \
     python3-pip \
     chromium \
+    dbus \
+    dbus-x11 \
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
