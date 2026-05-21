@@ -254,6 +254,8 @@ With `CLOUDFLARE_WORKERS_TOKEN` set, HuggingMes can create a keep-alive worker t
 | `SYNC_INTERVAL` | `600` | Backup frequency in seconds |
 | `CLOUDFLARE_KEEPALIVE_ENABLED` | `true` | Set `false` to disable keep-awake worker |
 | `TELEGRAM_MODE` | `webhook` | `webhook` or `polling` (webhook auto-configured from `SPACE_HOST`) |
+| `DEV_MODE` | `true` | Set `false` to disable JupyterLab terminal at `/terminal/` |
+| `JUPYTER_TOKEN` | *(uses `GATEWAY_TOKEN`)* | Override terminal password (optional) |
 | `WEBHOOK_URL` | — | Endpoint for POST JSON restart notifications |
 | `GATEWAY_RESTART_DELAY` | `5` | Seconds between gateway restart attempts |
 | `GATEWAY_MAX_RESTARTS` | `0` (unlimited) | Maximum gateway restart count before container exits |
@@ -266,6 +268,7 @@ HuggingMes includes a JupyterLab terminal at `/terminal/` for direct shell acces
 
 The terminal is **on by default** — no extra configuration needed. Click **Open Terminal →** on the dashboard, then log in with your `GATEWAY_TOKEN`.
 
+To disable it, set `DEV_MODE=false`. To use a separate terminal password, set `JUPYTER_TOKEN` to a different value.
 
 > **Security:** JupyterLab grants full shell access to the container. The terminal will not start if no `GATEWAY_TOKEN` is set.
 
@@ -289,7 +292,7 @@ docker compose up --build
 - **Dashboard (`/`)**: Real-time management and monitoring.
 - **Hermes App (`/app/`)**: Secure proxied access to the Hermes UI.
 - **API (`/v1/*`)**: Proxied OpenAI-compatible agent API.
-- **Terminal (`/terminal/`)**: JupyterLab terminal (auto-enabled when `GATEWAY_TOKEN` is set).
+- **Terminal (`/terminal/`)**: JupyterLab terminal (auto-enabled when `GATEWAY_TOKEN` is set; set `DEV_MODE=false` to disable).
 - **Health Check (`/health`)**: Readiness probe for HF and keep-alive.
 - **Sync Engine**: Python background task for HF Dataset persistence.
 
