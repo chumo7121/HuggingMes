@@ -54,6 +54,7 @@ COPY --chown=hermes:hermes cloudflare-proxy-setup.py /opt/huggingmes/cloudflare-
 COPY --chown=hermes:hermes cloudflare-keepalive-setup.py /opt/huggingmes/cloudflare-keepalive-setup.py
 COPY --chown=hermes:hermes env-builder.html /opt/huggingmes/env-builder.html
 COPY --chown=hermes:hermes env-builder.js /opt/huggingmes/env-builder.js
+COPY --chown=hermes:hermes discord_bot.py /opt/huggingmes/discord_bot.py
 
 RUN chmod +x \
     /opt/huggingmes/start.sh \
