@@ -695,6 +695,25 @@ fi
 # ── Start background services ──
 node "$APP_DIR/health-server.js" &
 HEALTH_PID=$!
+DISCORD_PID=""
+
+start_discord_bot_once() {
+  if [ -z "${DISCORD_BOT_TOKEN:-}" ]; then
+    return 0
+  fi
+
+  if [ -n "${DISCORD_PID:-}" ] && kill -0 "$DISCORD_PID" 2>/dev/null; then
+    return 0
+  fi
+
+  echo "Starting Discord bot..."
+  /opt/hermes/.venv/bin/python "$APP_DIR/discord_bot.py" >> "$HERMES_HOME/logs/discord.log" 2>&1 &
+  DISCORD_PID=$!
+  export DISCORD_PID
+  echo "Discord bot started (PID: $DISCORD_PID)"
+}
+
+start_discord_bot_once
 
 if [ -n "${WEBHOOK_URL:-}" ]; then
   python3 - <<'PY' >/dev/null 2>&1 &
@@ -740,6 +759,12 @@ GATEWAY_RESTART_COUNT=0
 GATEWAY_READY_TIMEOUT="${GATEWAY_READY_TIMEOUT:-120}"
 
 while true; do
+  if [ -n "${DISCORD_BOT_TOKEN:-}" ] && [ -n "${DISCORD_PID:-}" ] && ! kill -0 "$DISCORD_PID" 2>/dev/null; then
+    echo "Warning: Discord bot exited; restarting..."
+    unset DISCORD_PID
+    start_discord_bot_once
+  fi
+  
   # Monitor health-server — restart if it died unexpectedly
   if [ -n "${HEALTH_PID:-}" ] && ! kill -0 "$HEALTH_PID" 2>/dev/null; then
     echo "Warning: health-server exited (PID $HEALTH_PID dead); restarting..."
