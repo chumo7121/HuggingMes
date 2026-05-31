@@ -35,12 +35,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         || apt-get install -y --no-install-recommends libasound2t64 2>/dev/null \
         || true) \
     && rm -rf /var/lib/apt/lists/* \
-    && uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
-        huggingface_hub \
-        hf_transfer \
-        "jupyterlab>=4.0,<5" \
-        "tornado>=6.4" \
-        "ipywidgets>=8.1" \
+    uv pip install --python /opt/hermes/.venv/bin/python --no-cache-dir \
+      huggingface_hub \
+      hf_transfer \
+      "jupyterlab>=4.0,<5" \
+      "tornado>=6.4" \
+      "ipywidgets>=8.1" \
+      "discord.py>=2.4.0" \
+      "aiohttp>=3.9.0" \
     && printf 'hermes ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/hermes \
     && chmod 0440 /etc/sudoers.d/hermes \
     && /usr/sbin/visudo -cf /etc/sudoers.d/hermes
